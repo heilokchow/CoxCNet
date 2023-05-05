@@ -30,7 +30,7 @@ List SimSetC(int n, double Csparse, NumericVector Zij) {
   if (d[0] != n || d[1] != n)
     return 0;
 
-  double maxit(10.0), temp(0.0), tp(0.0), shift(Csparse*log(n)), rej(0.0);
+  double maxit(20.0), temp(0.0), tp(0.0), shift(Csparse*log(n)), rej(0.0);
   std::vector<int> se;
   std::vector<int> re;
   std::vector<double> te;
@@ -39,8 +39,8 @@ List SimSetC(int n, double Csparse, NumericVector Zij) {
   std::poisson_distribution<int> Pdis(maxit);
   std::uniform_real_distribution<double> Udis(0.0,1.0);
 
-  for (int i = 1; i <= n; i++) {
-    for (int j = 1; j <= n; j++ ) {
+  for (int i = 1; i <= n - 1; i++) {
+    for (int j = i + 1; j <= n; j++ ) {
       if (i != j) {
         kp = Pdis(gen);
 
@@ -80,6 +80,6 @@ double fr(double t, const double& shift, int i, const int &n) {
 }
 
 double fg(double t) {
-  return 0.5;
+  return 0.2;
 }
 
