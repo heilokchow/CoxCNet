@@ -1,6 +1,7 @@
 library(Rcpp)
 library(RcppEigen)
 library(numDeriv)
+library(expm)
 
 Sys.setenv("PKG_CPPFLAGS" = "-march=native")
 sourceCpp(file = "Z:/network/CoxCNet/SimSet.cpp", verbose = TRUE, rebuild = TRUE)
@@ -56,7 +57,7 @@ lik <- function(beta, Nij, Zij, n, p) {
   }
   l = l - N0 * log(P0)
 
-  return(l)
+  return(-l)
 }
 
 
@@ -91,7 +92,7 @@ likMx <- function(betax, M, Nij, Zij, n, p) {
   }
   l = l - N0 * log(P0)
 
-  return(l)
+  return(-l)
 }
 
 # Test functions
@@ -109,6 +110,7 @@ h2 = hessian(likMx, betax, M = M, Nij = Nij, Zij = Zij, n = n, p = p)
 # Simulation --------------------------------------------------------------
 
 betaAll = matrix(0, 100, 3)
+betaAllz = matrix(0, 100, 3)
 
 for (z in 1:100) {
 
@@ -150,6 +152,7 @@ for (z in 1:100) {
   }
 
   betaAll[z, ] = beta0
+  betaAllz[z, ] = sqrtm(-h2) %*% (beta0 -  c(0, 1, 0.2))
   cat(z, "\n")
 
 }
@@ -165,3 +168,110 @@ betax[3] = 0.5
 
 likMx(betax, M, Nij, Zij, n, p)
 
+
+# ADMM SCAD ---------------------------------------------------------------
+
+st <- function(t, lam) {
+  return(sign(t)*(abs(t) - lam)*((abs(t) - lam) > 0))
+}
+
+stscad <- function(muij, lam, v, gam, n) {
+  if (abs(muij) <= lam + lam/v) {
+    return(st(muij, lam/v))
+  } else if (lam + lam/v < abs(muij) && abs(muij) < gam*lam) {
+    return(st(muij, gam*lam/((gam-1)*v))/ (1 - 1/((gam-1)*v)))
+  } else {
+    return(muij)
+  }
+}
+
+
+likP <- function(beta, Nij, Zij, n, p, vij, etaij, v) {
+
+  Pij = matrix(0, nrow = n, ncol = n)
+
+  x = c(0, beta[1:(n-1)])
+  y = beta[n:(n+p-1)]
+  for (i in 1:(n-1)) {
+    for (j in (i+1):n) {
+      Pij[i, j] = x[i] + x[j]
+      for (z in 1:p) {
+        Pij[i, j] = Pij[i, j] + Zij[i, j] * y[z]
+      }
+      Pij[i, j] = exp(Pij[i, j])
+      Pij[j, i] = Pij[i, j]
+    }
+  }
+
+  P0 = sum(Pij) / 2
+  Pi = colSums(Pij)
+
+  N0 = sum(Nij)
+
+  l = 0
+  for (i in 1:(n-1)) {
+    for (j in (i+1):n) {
+      l = l + Nij[i, j] * log(Pij[i, j])
+    }
+  }
+  l = l - N0 * log(P0)
+
+  l = -l
+  for (i in 1:(n-2)) {
+    for (j in (i+1):(n-1)) {
+    l = l + vij[i, j] * (beta[i] - beta[j] - etaij[i, j]) + v/2 * (beta[i] - beta[j] - etaij[i, j])^2
+    }
+  }
+  return(l)
+}
+
+likP(beta0, Nij, Zij, n, p, vij, etaij, v)
+likP(beta1, Nij, Zij, n, p, vij, etaij, v)
+likP(beta2, Nij, Zij, n, p, vij, etaij, v)
+
+beta2 = beta0 + solve(h1, g1)/100
+lik(beta2, Nij, Zij, n, p)
+
+admm_scad <- function(beta, Nij, Zij, n, p, lam, v) {
+
+  vij = matrix(0, nrow = n - 1, ncol = n - 1)
+  etaij = matrix(0, nrow = n - 1, ncol = n - 1)
+  dij = matrix(0, nrow = n - 1, ncol = n - 1)
+  one = matrix(1, nrow = n - 1, ncol = n - 1)
+  Iij = diag(1, n-1)
+
+  beta0 = rep(0.1, n+p-1)
+  beta = beta0[1:(n-1)]
+  sum_beta = sum(beta)
+
+  for (i1 in 1:10) {
+    for (i2 in 1:10) {
+      # g1 = grad(lik, beta0, Nij = Nij, Zij = Zij, n = n, p = p)
+      # g12 = v * ((n-1)*beta - sum_beta - colSums(etaij) - rowSums(etaij)) + colSums(vij) + rowSums(vij)
+      # g12 = c(g12, 0)
+      # g1 = g1 + g12
+
+      # h1 = hessian(lik, beta0, Nij = Nij, Zij = Zij, n = n, p = p)
+      # h1[1:(n-1), 1:(n-1)] = h1[1:(n-1), 1:(n-1)] + (n-1)*v*Iij - v*one
+
+      g13 = grad(likP, beta0, Nij = Nij, Zij = Zij, n = n, p = p, vij = vij, etaij = etaij, v = v)
+      h13 = hessian(likP, beta0, Nij = Nij, Zij = Zij, n = n, p = p, vij = vij, etaij = etaij, v = v)
+
+      beta1 = beta0 - solve(h13, g13)
+      beta0 = beta1
+    }
+
+    beta = beta0[1:(n-1)]
+    sum_beta = sum(beta)
+
+    for (i in 1:(n-2)) {
+      for (j in (i+1):(n-1)) {
+        dij[i, j] = beta[i] - beta[j] + vij[i, j]/v
+        etaij[i, j] = stscad(dij[i, j], lam, v, gam, n)
+        vij[i, j] = vij[i, j] + v*(beta[i] - beta[j] - etaij[i, j])
+      }
+    }
+
+    cat(round(beta, 2), "\n")
+  }
+}
