@@ -217,9 +217,9 @@ likP <- function(beta, Nij, Zij, n, p, vij, etaij, v) {
   l = l - N0 * log(P0)
 
   l = -l
-  for (i in 1:(n-2)) {
-    for (j in (i+1):(n-1)) {
-    l = l + vij[i, j] * (beta[i] - beta[j] - etaij[i, j]) + v/2 * (beta[i] - beta[j] - etaij[i, j])^2
+  for (i in 1:(n-1)) {
+    for (j in (i+1):(n)) {
+    l = l + vij[i, j] * (x[i] - x[j] - etaij[i, j]) + v/2 * (x[i] - x[j] - etaij[i, j])^2
     }
   }
   return(l)
@@ -234,10 +234,10 @@ lik(beta2, Nij, Zij, n, p)
 
 admm_scad <- function(beta, Nij, Zij, n, p, lam, v) {
 
-  vij = matrix(0, nrow = n - 1, ncol = n - 1)
-  etaij = matrix(0, nrow = n - 1, ncol = n - 1)
-  dij = matrix(0, nrow = n - 1, ncol = n - 1)
-  one = matrix(1, nrow = n - 1, ncol = n - 1)
+  vij = matrix(0, nrow = n, ncol = n)
+  etaij = matrix(0, nrow = n, ncol = n)
+  dij = matrix(0, nrow = n, ncol = n)
+  one = matrix(1, nrow = n, ncol = n)
   Iij = diag(1, n-1)
 
   beta0 = rep(0.1, n+p-1)
@@ -263,12 +263,13 @@ admm_scad <- function(beta, Nij, Zij, n, p, lam, v) {
 
     beta = beta0[1:(n-1)]
     sum_beta = sum(beta)
+    x = c(0, beta[1:(n-1)])
 
-    for (i in 1:(n-2)) {
-      for (j in (i+1):(n-1)) {
-        dij[i, j] = beta[i] - beta[j] + vij[i, j]/v
+    for (i in 1:(n-1)) {
+      for (j in (i+1):n) {
+        dij[i, j] = x[i] - x[j] + vij[i, j]/v
         etaij[i, j] = stscad(dij[i, j], lam, v, gam, n)
-        vij[i, j] = vij[i, j] + v*(beta[i] - beta[j] - etaij[i, j])
+        vij[i, j] = vij[i, j] + v*(x[i] - x[j] - etaij[i, j])
       }
     }
 
