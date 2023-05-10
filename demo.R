@@ -5,6 +5,7 @@ library(expm)
 
 Sys.setenv("PKG_CPPFLAGS" = "-march=native")
 sourceCpp(file = "Z:/network/CoxCNet/SimSet.cpp", verbose = TRUE, rebuild = TRUE)
+sourceCpp(file = "Z:/network/CoxCNet/NT.cpp", verbose = TRUE, rebuild = TRUE)
 
 n = 20
 p = 1
@@ -106,6 +107,7 @@ g2 = grad(likMx, betax, M = M, Nij = Nij, Zij = Zij, n = n, p = p)
 h1 = hessian(lik, beta, Nij = Nij, Zij = Zij, n = n, p = p)
 h2 = hessian(likMx, betax, M = M, Nij = Nij, Zij = Zij, n = n, p = p)
 
+test = GradCN(beta, Nij, Zij, n, p, vij, etaij, v)
 
 # Simulation --------------------------------------------------------------
 
@@ -116,6 +118,7 @@ for (z in 1:100) {
 
   set.seed(z)
   Zij = matrix(rnorm(n*n), nrow = n, ncol = n)
+  Zij = (Zij + t(Zij)) / 2
   trail_sim = SimSetC(n, 0.5, array(Zij, c(n, n, 1)))
   nn = length(trail_sim[[1]])
 
