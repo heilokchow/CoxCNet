@@ -76,6 +76,20 @@ List GradCN(NumericVector beta, NumericVector Nij, NumericVector Zij, int n, int
     Gi[n - 1 + z] = N0*zE[z]/E0 - zN[z];
   }
 
+  for (int i = 0; i < (n - 1); i++) {
+    int i1 = i + 1;
+    Gi[i] -=  vij[i1 * n] + v * (0 - x[i1] - etaij[i1 * n]);
+  }
+
+  for (int i = 0; i < (n - 2); i++) {
+    for (int j = (i+1); j < (n - 1); j++) {
+      int i1 = i + 1;
+      int j1 = j + 1;
+      Gi[i] +=  vij[j1 * n + i1] + v * (x[i1] - x[j1] - etaij[j1 * n + i1]);
+      Gi[j] -=  vij[j1 * n + i1] + v * (x[i1] - x[j1] - etaij[j1 * n + i1]);
+    }
+  }
+
   for (int z = 0; z < p; z++) {
     for (int i = 0; i < n; i++) {
       for (int j = 0; j < n; j++) {
@@ -96,6 +110,19 @@ List GradCN(NumericVector beta, NumericVector Nij, NumericVector Zij, int n, int
         Hij(i, j) = N0 * (Eij(i1, j1) * E0 - Ei[i1] * Ei[j1]) / (E0 * E0);
         Hij(j, i) = Hij(i, j);
       }
+    }
+  }
+
+  for (int i = 0; i < (n - 1); i++) {
+    Hij(i, i) += v;
+  }
+
+  for (int i = 0; i < (n - 2); i++) {
+    for (int j = (i+1); j < (n - 1); j++) {
+      Hij(i, i) += v;
+      Hij(i, j) -= v;
+      Hij(j, i) -= v;
+      Hij(j, j) += v;
     }
   }
 
