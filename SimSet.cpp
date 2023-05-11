@@ -30,7 +30,7 @@ List SimSetC(int n, double Csparse, NumericVector Zij) {
   if (d[0] != n || d[1] != n)
     return 0;
 
-  double maxit(20.0), temp(0.0), tp(0.0), shift(Csparse*log(n)), rej(0.0);
+  double maxit(50.0), temp(0.0), tp(0.0), shift(Csparse*log(n)), rej(0.0);
   std::vector<int> se;
   std::vector<int> re;
   std::vector<double> te;
@@ -70,14 +70,49 @@ List SimSetC(int n, double Csparse, NumericVector Zij) {
 }
 
 double fs(double t, const double& shift, int i, const int &n) {
-  if (i < n / 2) return 0;
+  if (i <= n / 3) return 0;
+  if (i > n / 3 && i <= 2*n / 3) return -1;
   return 1;
 }
 
 double fr(double t, const double& shift, int i, const int &n) {
-  if (i < n / 2) return 0;
+  if (i <= n / 3) return 0;
+  if (i > n / 3 && i <= 2*n / 3) return -1;
   return 1;
 }
+
+//
+// double fs(double t, const double& shift, int i, const int &n) {
+//   if (i <= 25) return 0;
+//   if (i > 25 && i <= 50) return -0.5;
+//   if (i > 50 && i <= 75) return 0.5;
+//   return 0;
+// }
+//
+// double fr(double t, const double& shift, int i, const int &n) {
+//   if (i <= 25) return 0;
+//   if (i > 25 && i <= 50) return -0.5;
+//   if (i > 50 && i <= 75) return 0.5;
+//   return 0;
+// }
+//
+// double fs(double t, const double& shift, int i, const int &n) {
+//   if (i <= 40) return 0;
+//   if (i > 40 && i <= 80) return 0.2;
+//   if (i > 80 && i <= 120) return 0.4;
+//   if (i > 120 && i <= 160) return 0.6;
+//   if (i > 160 && i <= 200) return 0.8;
+//   return 1;
+// }
+//
+// double fr(double t, const double& shift, int i, const int &n) {
+//   if (i <= 40) return 0;
+//   if (i > 40 && i <= 80) return 0.2;
+//   if (i > 80 && i <= 120) return 0.4;
+//   if (i > 120 && i <= 160) return 0.6;
+//   if (i > 160 && i <= 200) return 0.8;
+//   return 1;
+// }
 
 double fg(double t) {
   return 0.2;
