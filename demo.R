@@ -641,6 +641,10 @@ vij = matrix(0, nrow = n, ncol = n)
 etaij = matrix(0, nrow = n, ncol = n)
 v = 2
 
+
+# START HERE
+sourceCpp(file = "Z:/network/CoxCNet/SimSet.cpp", verbose = TRUE, rebuild = TRUE)
+
 set.seed(3)
 Zij = matrix(rnorm(n*n), nrow = n, ncol = n)
 Zij = (Zij + t(Zij)) / 2
@@ -654,13 +658,13 @@ for (i in 1:nn) {
   Nij[p1, q1] = Nij[p1, q1] + 1
 }
 
-tune = exp(seq(-3, 1, 0.25))
+tune = exp(seq(-1.5, 3, 0.5))
 scadAll = matrix(0, nrow = n - 1, ncol = length(tune))
 
 # beta = M %*% c(0, 0.3, 0.7, 1, 0.2)
 
 for (i in 1:length(tune)) {
-  test = admm_scad(beta, Nij, Zij, n, p, tune[i], 10, 2)
+  test = admm_scad(beta, Nij, Zij, n, p, tune[i], 100, 3.7)
   scadAll[, i] = test
 }
 
@@ -668,6 +672,6 @@ xaxis = log(tune)
 yaxis = t(scadAll)
 matplot(xaxis, yaxis, lty = 1, xlab = "log(tune)", ylab = "coefficients", type = "l")
 
-plot(round(scadAll[, 4], 2))
+plot(round(scadAll[, 15], 2))
 
 

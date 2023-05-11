@@ -71,14 +71,14 @@ List SimSetC(int n, double Csparse, NumericVector Zij) {
 
 double fs(double t, const double& shift, int i, const int &n) {
   if (i <= n / 3) return 0;
-  if (i > n / 3 && i <= 2*n / 3) return -1;
-  return 1;
+  if (i > n / 3 && i <= 2*n / 3) return 1;
+  return 2;
 }
 
 double fr(double t, const double& shift, int i, const int &n) {
   if (i <= n / 3) return 0;
-  if (i > n / 3 && i <= 2*n / 3) return -1;
-  return 1;
+  if (i > n / 3 && i <= 2*n / 3) return 1;
+  return 2;
 }
 
 //
