@@ -198,6 +198,23 @@ stscad <- function(muij, lam, v, gam, n) {
   }
 }
 
+stmcp <- function(muij, lam, v, gam, n) {
+  if (abs(muij) <= gam*lam) {
+    return(st(muij, lam/v) / (1-1/(gam*v)))
+  } else {
+    return(muij)
+  }
+}
+
+pscad <- function(x, lam, a) {
+  if (abs(x) <= lam) {
+    return(lam*abs(x))
+  } else if (abs(x) > lam && abs(x) <= a*lam) {
+    return((2*a*lam*abs(x)-x^2-lam^2)/(2*(a-1)))
+  } else {
+    return(lam^2*(a+1)/2)
+  }
+}
 
 likP <- function(beta, Nij, Zij, n, p, vij, etaij, v) {
 
@@ -238,6 +255,57 @@ likP <- function(beta, Nij, Zij, n, p, vij, etaij, v) {
   return(l)
 }
 
+likQ <- function(beta, Nij, Zij, n, p, lam, gam) {
+
+  Pij = matrix(0, nrow = n, ncol = n)
+
+  x = c(0, beta[1:(n-1)])
+  y = beta[n:(n+p-1)]
+  for (i in 1:(n-1)) {
+    for (j in (i+1):n) {
+      Pij[i, j] = x[i] + x[j]
+      for (z in 1:p) {
+        Pij[i, j] = Pij[i, j] + Zij[i, j] * y[z]
+      }
+      Pij[i, j] = exp(Pij[i, j])
+      Pij[j, i] = Pij[i, j]
+    }
+  }
+
+  P0 = sum(Pij) / 2
+  Pi = colSums(Pij)
+
+  N0 = sum(Nij)
+
+  l = 0
+  for (i in 1:(n-1)) {
+    for (j in (i+1):n) {
+      l = l + Nij[i, j] * log(Pij[i, j])
+    }
+  }
+  l = l - N0 * log(P0)
+
+  l = -l
+  for (i in 2:(n-1)) {
+    for (j in (i+1):(n)) {
+      l = l + pscad(x[i] - x[j], lam, gam) * n
+    }
+  }
+  return(l)
+}
+
+Qpen <- function(beta, n, lam, gam) {
+  l = 0
+  x = c(0, beta[1:(n-1)])
+  for (i in 2:(n-1)) {
+    for (j in (i+1):(n)) {
+      l = l + pscad(x[i] - x[j], lam, gam)
+    }
+  }
+  return(l)
+}
+
+
 likP(beta0, Nij, Zij, n, p, vij, etaij, v)
 likP(beta1, Nij, Zij, n, p, vij, etaij, v)
 likP(beta2, Nij, Zij, n, p, vij, etaij, v)
@@ -263,11 +331,11 @@ admm_scad <- function(beta, Nij, Zij, n, p, lam, v, gam) {
   diff1 = 3
   cont1 = 0
 
-  while (cont1 < 100 && diff1 > 1e-3) {
+  while (cont1 < 10000 && diff1 > 1e-3) {
 
     diff = 10
     cont = 1
-    while (cont < 20 && diff > 1e-3) {
+    while (cont < 100 && diff > 1e-3) {
       # g1 = grad(lik, beta0, Nij = Nij, Zij = Zij, n = n, p = p)
       # g12 = v * ((n-1)*beta - sum_beta - colSums(etaij) - rowSums(etaij)) + colSums(vij) + rowSums(vij)
       # g12 = c(g12, 0)
@@ -296,10 +364,12 @@ admm_scad <- function(beta, Nij, Zij, n, p, lam, v, gam) {
     sum_beta = sum(beta)
     x = c(0, beta[1:(n-1)])
 
-    for (i in 1:(n-1)) {
+    for (i in 2:(n-1)) {
       for (j in (i+1):n) {
         dij[i, j] = x[i] - x[j] + vij[i, j]/v
-        etaij[i, j] = stscad(dij[i, j], lam, v, gam, n)
+        etaij[i, j] = stmcp(dij[i, j], lam, v, gam, n)
+        # etaij[i, j] = stscad(dij[i, j], lam, v, gam, n)
+        # etaij[i, j] = st(dij[i, j], lam / gam)
         vij[i, j] = vij[i, j] + v*(x[i] - x[j] - etaij[i, j])
       }
     }
@@ -310,12 +380,31 @@ admm_scad <- function(beta, Nij, Zij, n, p, lam, v, gam) {
     beta00 = beta0
     etaij0 = etaij
 
-    cat(round(beta, 2), "\n")
+    cat(diff1, "\n")
   }
 
-  return(beta)
+  return(list(beta = beta0, vij = vij, etaij = etaij))
 }
 
+ngroup <- function(beta) {
+  l = length(beta)
+  s = beta[1]
+  cont = 1
+  for (i in 2:l) {
+    flag = 1
+    for (j in 1:cont) {
+      if (abs(beta[i] - s[j]) < 0.02) {
+        flag = 0
+        break
+      }
+    }
+    if (flag == 1) {
+      s = c(s, beta[i])
+      cont = cont + 1
+    }
+  }
+  return(s)
+}
 
 # Simulation 1 (Oracle) ---------------------------------------------------
 
@@ -610,28 +699,24 @@ curve(dnorm(x), xlab = "", ylab = "", add = T, lwd = 2.0)
 
 # simulation SCAD ---------------------------------------------------------
 
-n = 45
+n = 50
 p = 1
 Nij = matrix(0, nrow = n, ncol = n)
 Zij = matrix(rnorm(n*n), nrow = n, ncol = n)
-M = matrix(0, nrow = (n+p-1), ncol = 4)
+M = matrix(0, nrow = (n+p-1), ncol = 3)
 
-for (i in 1:14) {
+for (i in 1:24) {
   M[i, 1] = 1
 }
 
-for (i in 15:29) {
+for (i in 25:49) {
   M[i, 2] = 1
 }
 
-for (i in 30:44) {
-  M[i, 3] = 1
-}
-
-M[45, 4] = 1
+M[50, 3] = 1
 
 beta = rep(0, n + p - 1)
-betax = rep(0, 4)
+betax = c(0, 3, 0.2)
 
 betaAll = matrix(0, 1000, 4)
 betaAllz = matrix(0, 1000, 4)
@@ -658,20 +743,100 @@ for (i in 1:nn) {
   Nij[p1, q1] = Nij[p1, q1] + 1
 }
 
-tune = exp(seq(-1.5, 3, 0.5))
+tune = exp(seq(-1.5, 5, 0.5))
 scadAll = matrix(0, nrow = n - 1, ncol = length(tune))
+bicall = c()
+kgall = c()
+likall = c()
+n0 = sum(Nij)
+betaT = M %*% betax
+
+beta = rep(0, n + p - 1)
+for (i in 1:14) {
+  beta[i] = -1
+}
+for (i in 15:29) {
+  beta[i] = 1
+}
+for (i in 30:44) {
+  beta[i] = 0
+}
+beta[45] = 0.2
+
 
 # beta = M %*% c(0, 0.3, 0.7, 1, 0.2)
 
 for (i in 1:length(tune)) {
-  test = admm_scad(beta, Nij, Zij, n, p, tune[i], 100, 3.7)
-  scadAll[, i] = test
+  test = admm_scad(beta, Nij, Zij, n, p, tune[i], 10, 3.7)
+  scadAll[, i] = test$beta[1:(n-1)]
+
+  beta0 = rep(0, 3)
+
+  diff = 10
+  cont = 1
+  while (cont < 10 && diff > 1e-3) {
+
+    beta01 = M %*% beta0
+
+    test = GradCN(beta01, Nij, Zij, n, p, vij, etaij, v, 0)
+
+    g2 = test$g
+    h2 = test$h
+
+    g22 = t(M) %*% g2
+    h22 = t(M) %*% h2 %*% M
+
+    beta1 = beta0 - solve(h22, g22)
+    cont = cont + 1
+    diff = sum(abs(beta1 - beta0))
+
+    beta0 = beta1
+  }
+
+  kg = length(ngroup(test$beta[1:(n-1)]))
+  kgall = c(kgall, kg)
+  likall = c(likall, lik(test$beta, Nij, Zij, n, p))
+  bicall = c(bicall, lik(test$beta, Nij, Zij, n, p) + log(log(n))*(kg + p)*log(n0))
 }
+
+betax = c(sum(test$beta[1:14])/14, sum(test$beta[15:29])/15, sum(test$beta[30:44])/15, test$beta[45])
+betaT = M %*% betax
+betaT = M %*% beta0
+
+lik(test$beta, Nij, Zij, n, p)
+lik(betaT, Nij, Zij, n, p)
+
+likQ(test$beta, Nij, Zij, n, p, tune[i], 3.7)
+likQ(betaT, Nij, Zij, n, p, tune[i], 3.7)
+likQ(beta, Nij, Zij, n, p, tune[i], 3.7)
+
+r = rep(0, n + p - 1)
+r[1] = 0.1
+likQ(betaT, Nij, Zij, n, p, 1, 3.7)
+likQ(betaT - r, Nij, Zij, n, p, 1, 3.7)
+
+Qpen(beta, n, tune[i], 3.7)
+Qpen(betaT, n, tune[i], 3.7)
+Qpen(test$beta, n, tune[i], 3.7)
+
+glik1 = grad(lik, betaT, Nij = Nij, Zij = Zij, n = n, p = p)
+
+glikQ1 = grad(likQ, betaT, Nij = Nij, Zij = Zij, n = n, p = p, lam = 1, gam = 3.7, side = rep(1, n + p - 1))
+glikQ2 = grad(likQ, betaT, Nij = Nij, Zij = Zij, n = n, p = p, lam = 1, gam = 1.2, side = rep(-1, n + p - 1))
+
+(glikQ1 * glikQ2) < 0
+
+gQpen1 = n*grad(Qpen, betaT, n = n, lam = 1, gam = 3.7, side = rep(1, n + p - 1))
+gQpen2 = n*grad(Qpen, betaT, n = n, lam = 1, gam = 3.7, side = rep(-1, n + p - 1))
+
+likP(test$beta, Nij, Zij, n, p, vij, etaij, v)
+likP(betaT, Nij, Zij, n, p, vij, etaij, v)
 
 xaxis = log(tune)
 yaxis = t(scadAll)
 matplot(xaxis, yaxis, lty = 1, xlab = "log(tune)", ylab = "coefficients", type = "l")
 
-plot(round(scadAll[, 15], 2))
+plot(bicall)
+plot(kgall)
 
 

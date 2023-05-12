@@ -30,7 +30,7 @@ List SimSetC(int n, double Csparse, NumericVector Zij) {
   if (d[0] != n || d[1] != n)
     return 0;
 
-  double maxit(50.0), temp(0.0), tp(0.0), shift(Csparse*log(n)), rej(0.0);
+  double maxit(500.0), temp(0.0), tp(0.0), shift(Csparse*log(n)), rej(0.0);
   std::vector<int> se;
   std::vector<int> re;
   std::vector<double> te;
@@ -70,15 +70,13 @@ List SimSetC(int n, double Csparse, NumericVector Zij) {
 }
 
 double fs(double t, const double& shift, int i, const int &n) {
-  if (i <= n / 3) return 0;
-  if (i > n / 3 && i <= 2*n / 3) return 1;
-  return 2;
+  if (i <= n / 2) return 0;
+  return 3;
 }
 
 double fr(double t, const double& shift, int i, const int &n) {
-  if (i <= n / 3) return 0;
-  if (i > n / 3 && i <= 2*n / 3) return 1;
-  return 2;
+  if (i <= n / 2) return 0;
+  return 3;
 }
 
 //
