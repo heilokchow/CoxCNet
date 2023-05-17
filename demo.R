@@ -7,6 +7,7 @@ library(latex2exp)
 Sys.setenv("PKG_CPPFLAGS" = "-march=native")
 sourceCpp(file = "Z:/network/CoxCNet/SimSet.cpp", verbose = TRUE, rebuild = TRUE)
 sourceCpp(file = "Z:/network/CoxCNet/NT.cpp", verbose = TRUE, rebuild = TRUE)
+sourceCpp(file = "Z:/network/CoxCNet/LikCn.cpp", verbose = TRUE, rebuild = TRUE)
 
 n = 20
 p = 1
@@ -39,7 +40,7 @@ lik <- function(beta, Nij, Zij, n, p) {
     for (j in (i+1):n) {
       Pij[i, j] = x[i] + x[j]
       for (z in 1:p) {
-        Pij[i, j] = Pij[i, j] + Zij[i, j] * y[z]
+        Pij[i, j] = Pij[i, j] + Zij[i, j, z] * y[z]
       }
       Pij[i, j] = exp(Pij[i, j])
       Pij[j, i] = Pij[i, j]
@@ -226,7 +227,7 @@ likP <- function(beta, Nij, Zij, n, p, vij, etaij, v) {
     for (j in (i+1):n) {
       Pij[i, j] = x[i] + x[j]
       for (z in 1:p) {
-        Pij[i, j] = Pij[i, j] + Zij[i, j] * y[z]
+        Pij[i, j] = Pij[i, j] + Zij[i, j, z] * y[z]
       }
       Pij[i, j] = exp(Pij[i, j])
       Pij[j, i] = Pij[i, j]
@@ -331,7 +332,7 @@ admm_scad <- function(beta, Nij, Zij, n, p, lam, v, gam) {
   diff1 = 3
   cont1 = 0
 
-  while (cont1 < 10000 && diff1 > 1e-3) {
+  while (cont1 < 2000 && diff1 > 1e-3) {
 
     diff = 10
     cont = 1
@@ -352,7 +353,18 @@ admm_scad <- function(beta, Nij, Zij, n, p, lam, v, gam) {
       g13 = test$g
       h13 = test$h
 
-      beta1 = beta0 - solve(h13, g13)
+      step = solve(h13, g13)
+      l1 = LikCN(beta0, Nij, zij, n, p, vij, etaij, v, 1)[[1]]
+      bet = 1
+      for (i in 1:3) {
+        l2 = LikCN(beta0 - bet * step, Nij, zij, n, p, vij, etaij, v, 1)[[1]]
+        if (l2 > l1) {
+          bet = bet / 2
+        } else {
+          break
+        }
+      }
+      beta1 = beta0 - bet*step
 
       diff = sum(abs(beta1 - beta0))
       cont = cont + 1
@@ -367,8 +379,8 @@ admm_scad <- function(beta, Nij, Zij, n, p, lam, v, gam) {
     for (i in 2:(n-1)) {
       for (j in (i+1):n) {
         dij[i, j] = x[i] - x[j] + vij[i, j]/v
-        etaij[i, j] = stmcp(dij[i, j], lam, v, gam, n)
-        # etaij[i, j] = stscad(dij[i, j], lam, v, gam, n)
+        # etaij[i, j] = stmcp(dij[i, j], lam, v, gam, n)
+        etaij[i, j] = stscad(dij[i, j], lam, v, gam, n)
         # etaij[i, j] = st(dij[i, j], lam / gam)
         vij[i, j] = vij[i, j] + v*(x[i] - x[j] - etaij[i, j])
       }
@@ -393,7 +405,7 @@ ngroup <- function(beta) {
   for (i in 2:l) {
     flag = 1
     for (j in 1:cont) {
-      if (abs(beta[i] - s[j]) < 0.02) {
+      if (abs(beta[i] - s[j]) < 0.0001) {
         flag = 0
         break
       }
@@ -699,28 +711,29 @@ curve(dnorm(x), xlab = "", ylab = "", add = T, lwd = 2.0)
 
 # simulation SCAD ---------------------------------------------------------
 
-n = 50
+n = 45
 p = 1
 Nij = matrix(0, nrow = n, ncol = n)
 Zij = matrix(rnorm(n*n), nrow = n, ncol = n)
-M = matrix(0, nrow = (n+p-1), ncol = 3)
+M = matrix(0, nrow = (n+p-1), ncol = 4)
 
-for (i in 1:24) {
+for (i in 1:14) {
   M[i, 1] = 1
 }
 
-for (i in 25:49) {
+for (i in 15:29) {
   M[i, 2] = 1
 }
 
-M[50, 3] = 1
+for (i in 30:44) {
+  M[i, 3] = 1
+}
+
+M[45, 4] = 1
 
 beta = rep(0, n + p - 1)
-betax = c(0, 3, 0.2)
+betax = rep(0, 4)
 
-betaAll = matrix(0, 1000, 4)
-betaAllz = matrix(0, 1000, 4)
-betaAllse = matrix(0, 1000, 4)
 
 vij = matrix(0, nrow = n, ncol = n)
 etaij = matrix(0, nrow = n, ncol = n)
@@ -730,74 +743,68 @@ v = 2
 # START HERE
 sourceCpp(file = "Z:/network/CoxCNet/SimSet.cpp", verbose = TRUE, rebuild = TRUE)
 
-set.seed(3)
-Zij = matrix(rnorm(n*n), nrow = n, ncol = n)
-Zij = (Zij + t(Zij)) / 2
-trail_sim = SimSetC(n, 0.5, array(Zij, c(n, n, 1)))
-nn = length(trail_sim[[1]])
+betamin = matrix(0, 100, n)
+bicmin = rep(0, 100)
+gmin = rep(0, 100)
 
-Nij = matrix(0, nrow = n, ncol = n)
-for (i in 1:nn) {
-  p1 = trail_sim[[1]][i]
-  q1 = trail_sim[[2]][i]
-  Nij[p1, q1] = Nij[p1, q1] + 1
-}
+for (z in 1:100) {
+  set.seed(z)
+  Zij = matrix(rnorm(n*n), nrow = n, ncol = n)
+  Zij = (Zij + t(Zij)) / 2
+  trail_sim = SimSetC(n, 0.5, array(Zij, c(n, n, 1)))
+  nn = length(trail_sim[[1]])
 
-tune = exp(seq(-1.5, 5, 0.5))
-scadAll = matrix(0, nrow = n - 1, ncol = length(tune))
-bicall = c()
-kgall = c()
-likall = c()
-n0 = sum(Nij)
-betaT = M %*% betax
-
-beta = rep(0, n + p - 1)
-for (i in 1:14) {
-  beta[i] = -1
-}
-for (i in 15:29) {
-  beta[i] = 1
-}
-for (i in 30:44) {
-  beta[i] = 0
-}
-beta[45] = 0.2
-
-
-# beta = M %*% c(0, 0.3, 0.7, 1, 0.2)
-
-for (i in 1:length(tune)) {
-  test = admm_scad(beta, Nij, Zij, n, p, tune[i], 10, 3.7)
-  scadAll[, i] = test$beta[1:(n-1)]
-
-  beta0 = rep(0, 3)
-
-  diff = 10
-  cont = 1
-  while (cont < 10 && diff > 1e-3) {
-
-    beta01 = M %*% beta0
-
-    test = GradCN(beta01, Nij, Zij, n, p, vij, etaij, v, 0)
-
-    g2 = test$g
-    h2 = test$h
-
-    g22 = t(M) %*% g2
-    h22 = t(M) %*% h2 %*% M
-
-    beta1 = beta0 - solve(h22, g22)
-    cont = cont + 1
-    diff = sum(abs(beta1 - beta0))
-
-    beta0 = beta1
+  Nij = matrix(0, nrow = n, ncol = n)
+  for (i in 1:nn) {
+    p1 = trail_sim[[1]][i]
+    q1 = trail_sim[[2]][i]
+    Nij[p1, q1] = Nij[p1, q1] + 1
   }
 
-  kg = length(ngroup(test$beta[1:(n-1)]))
-  kgall = c(kgall, kg)
-  likall = c(likall, lik(test$beta, Nij, Zij, n, p))
-  bicall = c(bicall, lik(test$beta, Nij, Zij, n, p) + log(log(n))*(kg + p)*log(n0))
+  # MCP / SCAD
+  tune = exp(seq(-3.5, -0.5, 0.25))
+
+  # L1
+  # tune = exp(seq(-5, -0.1, 0.25))
+  scadAll = matrix(0, nrow = n - 1, ncol = length(tune))
+  scadAll1 = matrix(0, nrow = n, ncol = length(tune))
+  bicall = c()
+  kgall = c()
+  likall = c()
+  n0 = sum(Nij)
+
+  for (i in 1:length(tune)) {
+    test = admm_scad(beta, Nij, Zij, n, p, tune[i], 10, 3.7)
+    scadAll[, i] = test$beta[1:(n-1)]
+    scadAll1[, i] = test$beta
+
+    kg = length(ngroup(test$beta[1:(n-1)]))
+    kgall = c(kgall, kg)
+    likall = c(likall, 2*lik(test$beta, Nij, Zij, n, p))
+    bicall = c(bicall, 2*lik(test$beta, Nij, Zij, n, p) + log(log(n))*(kg + p)*log(n0))
+  }
+
+  cs = which.min(bicall)
+  betamin[z, ] = scadAll1[, cs]
+  bicmin[z] = bicall[cs]
+  gmin[z] = kgall[cs]
+
+  cat(z, gmin[z], "\n")
 }
+
+
+apply(betamin, 2, mean)[c(1, 16, 31, 45)]
+apply(betamin, 2, sd)[c(1, 16, 31, 45)]
+
+mean(bicmin)
+mean(gmin)
+sd(gmin)
+sum(gmin == 3)
+
+apply(betaAll, 2, sd)
+apply(betaAllse, 2, mean)
+1-apply(abs(betaAllz) > 1.96, 2, sum)/1000
+
 
 betax = c(sum(test$beta[1:14])/14, sum(test$beta[15:29])/15, sum(test$beta[30:44])/15, test$beta[45])
 betaT = M %*% betax
@@ -839,4 +846,666 @@ matplot(xaxis, yaxis, lty = 1, xlab = "log(tune)", ylab = "coefficients", type =
 plot(bicall)
 plot(kgall)
 
+
+# Censoring ---------------------------------------------------------------
+
+sourceCpp(file = "Z:/network/CoxCNet/LikCen.cpp", verbose = TRUE, rebuild = TRUE)
+sourceCpp(file = "Z:/network/CoxCNet/SimSet.cpp", verbose = TRUE, rebuild = TRUE)
+
+n = 45
+p = 1
+Nij = matrix(0, nrow = n, ncol = n)
+Zij = matrix(rnorm(n*n), nrow = n, ncol = n)
+M = matrix(0, nrow = (n+p-1), ncol = 4)
+
+for (i in 1:14) {
+  M[i, 1] = 1
+}
+
+for (i in 15:29) {
+  M[i, 2] = 1
+}
+
+for (i in 30:44) {
+  M[i, 3] = 1
+}
+
+M[45, 4] = 1
+
+beta = rep(0, n + p - 1)
+betax = rep(0, 5)
+
+betaAll = matrix(0, 1000, 5)
+betaAllz = matrix(0, 1000, 5)
+betaAllse = matrix(0, 1000, 5)
+
+vij = matrix(0, nrow = n, ncol = n)
+etaij = matrix(0, nrow = n, ncol = n)
+v = 2
+
+ceninfo = rep(0, n)
+for (i in 2:n) {
+  k = runif(1, 0, 1)
+  if (k < 0.8) {
+    ceninfo[i] = 1 - k
+  }
+}
+ceninfo[1] = 0.7
+
+cenord = order(ceninfo, decreasing = TRUE)
+n2 = sum(ceninfo > 0)
+
+c1 = ceninfo[cenord][n2:1]
+c2 = seq(0, n-1, 1)[cenord][n2:1]
+cenall = matrix(0, n2, 2)
+cenall[, 1] = c1
+cenall[, 2] = c2
+
+set.seed(z)
+Zij = matrix(rnorm(n*n), nrow = n, ncol = n)
+Zij = (Zij + t(Zij)) / 2
+trail_sim = SimSetC(n, 0.5, array(Zij, c(n, n, 1)))
+
+nn = length(trail_sim[[1]])
+trail_all = data.frame(x = trail_sim[[1]], y = trail_sim[[2]], t = trail_sim[[3]])
+tsort = order(trail_all[[3]])
+trail_all = trail_all[tsort,]
+trail_all[,1:2] = trail_all[,1:2] - 1
+
+for (i in 1:n2) {
+  t1 = which(trail_all[, 1] == cenall[i, 2])
+  t11 = which(trail_all[t1, 3] > cenall[i, 1])
+  if (length(t11) > 0) {
+    trail_all = trail_all[-t1[t11], ]
+  }
+
+  t2 = which(trail_all[, 2] == cenall[i, 2])
+  t22 = which(trail_all[t2, 3] > cenall[i, 1])
+  if (length(t22) > 0) {
+    trail_all = trail_all[-t2[t22], ]
+  }
+}
+
+nn = nrow(trail_all)
+
+
+LikCEN(beta01, as.matrix(trail_all), cenall, Nij, Zij, nn, n, p, vij, etaij, 2, 0)
+
+beta0 = rep(0, 4)
+
+diff = 10
+cont = 1
+while (cont < 10 && diff > 1e-3) {
+
+  beta01 = M %*% beta0
+
+  test = GradCN(beta01, Nij, Zij, n, p, vij, etaij, v, 0)
+
+  g2 = grad(LikCEN, beta01, Trail = as.matrix(trail_all), cen = cenall, Nij = Nij,
+            Zij = Zij, nn = nn, n = n, p = p, vij = vij, etaij = etaij, v = 2, scad = 0)
+  h2 = hessian(LikCEN, beta01, Trail = as.matrix(trail_all), cen = cenall, Nij = Nij,
+            Zij = Zij, nn = nn, n = n, p = p, vij = vij, etaij = etaij, v = 2, scad = 0)
+
+  g22 = t(M) %*% g2
+  h22 = t(M) %*% h2 %*% M
+
+  beta1 = beta0 - solve(h22, g22)
+  cont = cont + 1
+  diff = sum(abs(beta1 - beta0))
+
+  beta0 = beta1
+  cat(cont)
+}
+
+beta02 = beta0
+beta02[1:3] = beta02[1:3] - 0.11
+beta12 = M %*% beta02
+LikCEN(beta01, as.matrix(trail_all), cenall, Nij, Zij, nn, n, p, vij, etaij, 2, 0)
+LikCEN(beta12, as.matrix(trail_all), cenall, Nij, Zij, nn, n, p, vij, etaij, 2, 0)
+
+
+
+# Enron email -------------------------------------------------------------
+
+library(readxl)
+enronSummary <- read_excel("Z:/dynamic network/dynamic/enron/enronSummary.xlsx")
+employess <- read_excel("Z:/dynamic network/dynamic/enron/employess.xlsx")
+
+enronSummary <- as.data.frame(enronSummary)
+employess <- as.data.frame(employess)
+
+n = max(enronSummary[,1])
+
+p = 4
+
+zij = array(0, c(n, n, p))
+
+
+# Define Homo -------------------------------------------------------------
+
+
+# 20 homophily Effects
+
+# 1
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 1] = (employess[i, 3] == "Legal" && employess[j, 3] == "Legal")
+    }
+  }
+}
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 2] = (employess[i, 3] == "Legal" && employess[j, 3] == "Trading") || (employess[j, 3] == "Legal" && employess[i, 3] == "Trading")
+    }
+  }
+}
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 3] = (employess[i, 3] == "Trading" && employess[j, 3] == "Trading")
+    }
+  }
+}
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 4] = (employess[i, 7] == "Junior" && employess[j, 7] == "Junior")
+    }
+  }
+}
+
+trail = enronSummary[,c(1,2,9)]
+nn = nrow(trail)
+trail = trail[-nn, ]
+nn = nrow(trail)
+
+flag = 1
+start = 1
+excl = c()
+for (i in 2:nn) {
+  if (trail[i, 1] == trail[i-1, 1] && trail[i, 3] == trail[i-1, 3]) {
+    flag = flag + 1
+  } else {
+    if (flag > 5) {
+      excl = c(excl, start:(start+flag-1))
+    }
+    start = i
+    flag = 1
+  }
+}
+
+trail = trail[-excl,]
+nn = nrow(trail)
+
+# Remove No communication individuals
+n = length(unique(trail[,1]))
+nid = sort(unique(trail[,1]))
+
+map_trail = rep(0, 156)
+for (i in 1:length(nid)) {
+  map_trail[nid[i]] = nid[i]
+}
+
+map_trail1 = map_trail
+count = 0
+for (i in 2:length(map_trail1)) {
+  if (map_trail1[i-1] == 0) {
+    count = count + 1
+  }
+  if (map_trail1[i] != 0) {
+    map_trail1[i] = map_trail1[i] - count
+  }
+}
+
+del = which(map_trail1 == 0)
+
+del_trail = c()
+for (i in 1:4) {
+  test = which(trail[, 2] == del[i])
+  if (length(test) != 0) {
+    del_trail = c(del_trail, test)
+  }
+}
+
+trail = trail[-del_trail, ]
+nn = nrow(trail)
+
+for (i in 1:nn) {
+  trail[i, 1] = map_trail1[trail[i, 1]]
+  trail[i, 2] = map_trail1[trail[i, 2]]
+}
+
+zij = zij[-del, -del, ]
+
+sum(sort(unique(trail[,1])) == sort(unique(trail[,2])))
+
+Nij = matrix(0, n, n)
+for (i in 1:nn) {
+  p1 = trail[i, 1]
+  q1 = trail[i, 2]
+  if (p1 < q1) {
+    Nij[p1, q1] = Nij[p1, q1] + 1
+  } else {
+    Nij[q1, p1] = Nij[q1, p1] + 1
+  }
+}
+
+n0 = sum(Nij)
+
+beta = rep(0, n + p - 1)
+tune = exp(seq(-6, -0.5, 0.5))
+scadAll = matrix(0, nrow = n - 1, ncol = length(tune))
+scadAll1 = matrix(0, nrow = n + p - 1, ncol = length(tune))
+bicall = c()
+kgall = c()
+likall = c()
+
+for (i in 1:length(tune)) {
+  test = admm_scad(beta, Nij, zij, n, p, tune[i], 10, 3.7)
+  scadAll[, i] = test$beta[1:(n-1)]
+  scadAll1[, i] = test$beta
+
+  kg = length(ngroup(test$beta[1:(n-1)]))
+  kgall = c(kgall, kg)
+  likall = c(likall, 2*lik(test$beta, Nij, zij, n, p))
+  bicall = c(bicall, 2*lik(test$beta, Nij, zij, n, p) + log(log(n))*(kg + p)*log(n0))
+}
+
+
+bicall = c()
+kgall = c()
+l0ikall = c()
+
+for (i in 1:length(tune)) {
+  kg = length(ngroup(scadAll[, i]))
+  kgall = c(kgall, kg)
+  likall = c(likall, 2*lik(scadAll1[, i], Nij, zij, n, p))
+  bicall = c(bicall, 2*lik(scadAll1[, i], Nij, zij, n, p) + log(log(n))*(kg + p)*log(n0))
+}
+
+xaxis = log(tune)
+yaxis = t(scadAll)
+matplot(xaxis, yaxis, lty = 1, xlab = "log(tune)", ylab = "coefficients", type = "l")
+abline(v = log(tune[3]), col="red", lwd=3, lty=2)
+
+beta0 = rep(0, n+p-1)
+beta = beta0[1:(n-1)]
+sum_beta = sum(beta)
+
+beta00 = beta0
+etaij0 = etaij
+
+diff = 10
+cont = 1
+while (cont < 100 && diff > 1e-3) {
+
+  test = GradCN(beta0, Nij, zij, n, p, vij, etaij, v, 0)
+
+  g13 = test$g
+  h13 = test$h
+
+  step = solve(h13, g13)
+  l1 = LikCN(beta0, Nij, zij, n, p, vij, etaij, v, 0)[[1]]
+  bet = 1
+  for (i in 1:3) {
+    l2 = LikCN(beta0 - bet * step, Nij, zij, n, p, vij, etaij, v, 0)[[1]]
+    if (l2 > l1) {
+      bet = bet / 2
+    } else {
+      break
+    }
+  }
+  beta1 = beta0 - bet*step
+
+
+  diff = sum(abs(beta1 - beta0))
+  cont = cont + 1
+
+  beta0 = beta1
+}
+
+sqrt(diag(solve(h13)))
+
+plot((colSums(Nij) + rowSums(Nij))[2:n], exp(test$beta[1:(n-1)]))
+
+enron_oracle = c(0, beta0[1:(n-1)])
+enron_scad = c(0, scadAll[1:(n-1), 3])
+
+ord_enron = order(enron_scad, decreasing = TRUE)
+enron_oracle[ord_enron]
+enron_scad[ord_enron]
+
+(colSums(Nij) + rowSums(Nij))[1:n][ord_enron]
+
+out_data = data.frame(rank = seq(1, n, 1), id = seq(1, n, 1)[ord_enron], edges = (colSums(Nij) + rowSums(Nij))[1:n][ord_enron],
+                      oracle = enron_oracle[ord_enron],
+                      sd = sqrt(diag(solve(h13)))[ord_enron], scad = enron_scad[ord_enron])
+
+# Baseline
+
+basehaz <- function(beta0, trailt, n) {
+
+  Pij = matrix(0, n, n)
+  x = c(0, beta0[1:(n-1)])
+  y = beta0[n:(n+p-1)]
+  for (i in 1:(n-1)) {
+    for (j in (i+1):n) {
+      Pij[i, j] = x[i] + x[j]
+      for (z in 1:p) {
+        Pij[i, j] = Pij[i, j] + zij[i, j, z] * y[z]
+      }
+      Pij[i, j] = exp(Pij[i, j])
+      Pij[j, i] = Pij[i, j]
+    }
+  }
+
+  P0 = sum(Pij) / 2
+
+  return(trailt / P0)
+
+}
+
+final_grad = grad(basehaz, beta0, trailt = sum(trail[, 3] < 1), n = n)
+sd_base = final_grad %*% solve(h13) %*% final_grad
+
+
+hazardtime = seq(0.01, 1, 0.01)
+hazardenron = rep(0, 100)
+
+for (i in 1:100) {
+  t1 = hazardtime[i]
+  hazardenron[i] = sum(trail[, 3] < t1) / P0
+}
+
+plot_base_enron = data.frame(x = hazardtime, y = hazardenron,
+                             yl = hazardenron - 1.96 * hazardenron/hazardenron[100] * sd_base[[1]],
+                             yu = hazardenron + 1.96 * hazardenron/hazardenron[100] * sd_base[[1]])
+
+
+ggplot(plot_base_enron, aes(x = x, y = y)) +
+  geom_line(size = 0.7) +
+  geom_ribbon(aes(ymin = yl, ymax = yu), alpha = 0.2, linetype = "dashed", size = 0.7) +
+  xlab(expression(italic("t"))) +
+  ylab("Cumulative Baseline Hazard") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+
+
+# High School -------------------------------------------------------------
+
+
+library(readxl)
+
+highschool <- as.data.frame(highschool)
+
+nn = nrow(highschool)
+n = max(highschool[,2])
+students <- seq(1, n, 1)
+studentsid1 <- rep(0, n)
+studentsid2 <- rep(0, n)
+
+Nij = matrix(0, n, n)
+
+for (i in 1:nn) {
+  p1 = highschool[i, 2]
+  q1 = highschool[i, 3]
+  if (p1 < q1) {
+    Nij[p1, q1] = Nij[p1, q1] + 1
+  } else {
+    Nij[q1, p1] = Nij[q1, p1] + 1
+  }
+}
+
+for (i in 1:n) {
+  temp = which(highschool[, 2] == students[i])
+  if (length(temp) > 0) {
+    studentsid1[i] = temp[1]
+  } else {
+    temp = which(highschool[, 3] == students[i])
+    studentsid2[i] = temp[1]
+  }
+}
+
+employess = rep(0, n)
+
+for (i in 1:n) {
+  if (studentsid1[i] > 0) {
+    employess[i] = highschool[studentsid1[i], 4]
+  } else {
+    employess[i] = highschool[studentsid2[i], 5]
+  }
+}
+
+
+p = 6
+
+zij = array(0, c(n, n, p))
+
+
+# Define Homo -------------------------------------------------------------
+
+
+# 20 homophily Effects
+
+# 1
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 1] = (employess[i] == "PC" && employess[j] == "PC")
+    }
+  }
+}
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 2] = (employess[i] == "PC" && employess[j] == "PC*") || (employess[j] == "PC" && employess[i] == "PC*")
+    }
+  }
+}
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 3] = (employess[i] == "PC" && employess[j] == "PSI*") || (employess[j] == "PC" && employess[i] == "PSI*")
+    }
+  }
+}
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 4] = (employess[i] == "PC*" && employess[j] == "PC*")
+    }
+  }
+}
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 5] = (employess[i] == "PC*" && employess[j] == "PSI*") || (employess[j] == "PC*" && employess[i] == "PSI*")
+    }
+  }
+}
+
+for (i in 1:n) {
+  for (j in 1:n) {
+    if (i != j) {
+      zij[i, j, 6] = (employess[i] == "PSI*" && employess[j] == "PSI*")
+    }
+  }
+}
+
+trail = highschool[,c(2,3,1)]
+trail[,3] = (trail[,3] - trail[1,3]) / (trail[nn,3] - trail[1,3])
+
+n0 = sum(Nij)
+
+beta = rep(0, n + p - 1)
+tune = exp(seq(-6, -0.5, 0.5))
+scadAll = matrix(0, nrow = n - 1, ncol = length(tune))
+scadAll1 = matrix(0, nrow = n + p - 1, ncol = length(tune))
+bicall = c()
+kgall = c()
+likall = c()
+
+for (i in 1:length(tune)) {
+  test = admm_scad(beta, Nij, zij, n, p, tune[i], 10, 3.7)
+  scadAll[, i] = test$beta[1:(n-1)]
+  scadAll1[, i] = test$beta
+
+  kg = length(ngroup(test$beta[1:(n-1)]))
+  kgall = c(kgall, kg)
+  likall = c(likall, 2*lik(test$beta, Nij, zij, n, p))
+  bicall = c(bicall, 2*lik(test$beta, Nij, zij, n, p) + log(log(n))*(kg + p)*log(n0))
+}
+
+
+bicall = c()
+kgall = c()
+l0ikall = c()
+
+for (i in 1:length(tune)) {
+  kg = length(ngroup(scadAll[, i]))
+  kgall = c(kgall, kg)
+  likall = c(likall, 2*lik(scadAll1[, i], Nij, zij, n, p))
+  bicall = c(bicall, 2*lik(scadAll1[, i], Nij, zij, n, p) + log(log(n))*(kg + p)*log(n0))
+}
+
+xaxis = log(tune)
+yaxis = t(scadAll)
+matplot(xaxis, yaxis, lty = 1, xlab = "log(tune)", ylab = "coefficients", type = "l")
+abline(v = log(tune[5]), col="red", lwd=3, lty=2)
+
+plot(xaxis, bicall, type = "b", xlab = "log(tune)", ylab = "BIC")
+abline(v = log(tune[5]), col="red", lwd=3, lty=2)
+
+
+beta0 = rep(0, n+p-1)
+beta = beta0[1:(n-1)]
+sum_beta = sum(beta)
+
+beta00 = beta0
+etaij0 = etaij
+
+diff = 10
+cont = 1
+while (cont < 100 && diff > 1e-3) {
+
+  test = GradCN(beta0, Nij, zij, n, p, vij, etaij, v, 0)
+
+  g13 = test$g
+  h13 = test$h
+
+  step = solve(h13, g13)
+  l1 = LikCN(beta0, Nij, zij, n, p, vij, etaij, v, 0)[[1]]
+  bet = 1
+  for (i in 1:3) {
+    l2 = LikCN(beta0 - bet * step, Nij, zij, n, p, vij, etaij, v, 0)[[1]]
+    if (l2 > l1) {
+      bet = bet / 2
+    } else {
+      break
+    }
+  }
+  beta1 = beta0 - bet*step
+
+
+  diff = sum(abs(beta1 - beta0))
+  cont = cont + 1
+
+  beta0 = beta1
+}
+
+sqrt(diag(solve(h13)))
+
+plot((colSums(Nij) + rowSums(Nij))[2:n], exp(test$beta[1:(n-1)]))
+
+student_oracle = c(0, beta0[1:(n-1)])
+student_scad = c(0, scadAll[1:(n-1), 5])
+
+ord_student = order(student_scad, decreasing = TRUE)
+student_oracle[ord_student]
+student_scad[ord_student]
+
+(colSums(Nij) + rowSums(Nij))[1:n][ord_student]
+
+out_data = data.frame(rank = seq(1, n, 1), id = seq(1, n, 1)[ord_student], edges = (colSums(Nij) + rowSums(Nij))[1:n][ord_student],
+                      oracle = student_oracle[ord_student],
+                      sd = sqrt(diag(solve(h13)))[ord_student], scad = student_scad[ord_student])
+
+scadAll1[n:(n+5), 5]
+
+# Baseline
+
+Pij = matrix(0, n, n)
+x = c(0, beta0[1:(n-1)])
+y = beta0[n:(n+p-1)]
+for (i in 1:(n-1)) {
+  for (j in (i+1):n) {
+    Pij[i, j] = x[i] + x[j]
+    for (z in 1:p) {
+      Pij[i, j] = Pij[i, j] + zij[i, j, z] * y[z]
+    }
+    Pij[i, j] = exp(Pij[i, j])
+    Pij[j, i] = Pij[i, j]
+  }
+}
+
+P0 = sum(Pij) / 2
+
+basehaz <- function(beta0, trailt, n) {
+
+  Pij = matrix(0, n, n)
+  x = c(0, beta0[1:(n-1)])
+  y = beta0[n:(n+p-1)]
+  for (i in 1:(n-1)) {
+    for (j in (i+1):n) {
+      Pij[i, j] = x[i] + x[j]
+      for (z in 1:p) {
+        Pij[i, j] = Pij[i, j] + zij[i, j, z] * y[z]
+      }
+      Pij[i, j] = exp(Pij[i, j])
+      Pij[j, i] = Pij[i, j]
+    }
+  }
+
+  P0 = sum(Pij) / 2
+
+  return(trailt / P0)
+
+}
+
+final_grad = grad(basehaz, beta0, trailt = sum(trail[, 3] < 1), n = n)
+sd_base = final_grad %*% solve(h13) %*% final_grad
+basehaz(beta0, sum(trail[, 3] < 1), n)
+
+hazardtime = seq(0.01, 1, 0.01)
+hazardenron = rep(0, 100)
+
+for (i in 1:100) {
+  t1 = hazardtime[i]
+  hazardenron[i] = sum(trail[, 3] < t1) / P0
+}
+
+plot_base_enron = data.frame(x = hazardtime, y = hazardenron,
+                             yl = hazardenron - 1.96 * hazardenron/hazardenron[100] * sd_base[[1]],
+                             yu = hazardenron + 1.96 * hazardenron/hazardenron[100] * sd_base[[1]])
+
+
+ggplot(plot_base_enron, aes(x = x, y = y)) +
+  geom_line(size = 0.7) +
+  geom_ribbon(aes(ymin = yl, ymax = yu), alpha = 0.2, linetype = "dashed", size = 0.7) +
+  xlab(expression(italic("t"))) +
+  ylab("Cumulative Baseline Hazard") +
+  theme_classic() +
+  theme(legend.position = "none")
 

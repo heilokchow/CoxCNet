@@ -86,8 +86,8 @@ List GradCN(NumericVector beta, NumericVector Nij, NumericVector Zij, int n, int
       for (int j = (i+1); j < (n - 1); j++) {
         int i1 = i + 1;
         int j1 = j + 1;
-        Gi[i] +=  vij[j1 * n + i1] + v * (x[i1] - x[j1] - etaij[j1 * n + i1]);
-        Gi[j] -=  vij[j1 * n + i1] + v * (x[i1] - x[j1] - etaij[j1 * n + i1]);
+        Gi[i] +=  n * vij[j1 * n + i1] + n * v * (x[i1] - x[j1] - etaij[j1 * n + i1]);
+        Gi[j] -=  n * vij[j1 * n + i1] + n * v * (x[i1] - x[j1] - etaij[j1 * n + i1]);
       }
     }
   }
@@ -123,10 +123,10 @@ List GradCN(NumericVector beta, NumericVector Nij, NumericVector Zij, int n, int
 
     for (int i = 0; i < (n - 2); i++) {
       for (int j = (i+1); j < (n - 1); j++) {
-        Hij(i, i) += v;
-        Hij(i, j) -= v;
-        Hij(j, i) -= v;
-        Hij(j, j) += v;
+        Hij(i, i) += n * v;
+        Hij(i, j) -= n * v;
+        Hij(j, i) -= n * v;
+        Hij(j, j) += n * v;
       }
     }
   }
@@ -152,5 +152,5 @@ List GradCN(NumericVector beta, NumericVector Nij, NumericVector Zij, int n, int
     }
   }
 
-  return List::create(_["g"] = Gi, _["e"] = Ei,  _["h"] = Hij);
+  return List::create(_["g"] = Gi, _["e"] = Ei,  _["h"] = Hij,  _["zE"] = zE,  _["zN"] = zN);
 }

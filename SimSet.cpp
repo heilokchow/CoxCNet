@@ -70,28 +70,30 @@ List SimSetC(int n, double Csparse, NumericVector Zij) {
 }
 
 double fs(double t, const double& shift, int i, const int &n) {
-  if (i <= n / 2) return 0;
-  return 3;
+  if (i <= n / 3) return 0;
+  if (i <= 2 * n / 3) return 0.5;
+  return 1;
 }
 
 double fr(double t, const double& shift, int i, const int &n) {
-  if (i <= n / 2) return 0;
-  return 3;
+  if (i <= n / 3) return 0;
+  if (i <= 2 * n / 3) return 0.5;
+  return 1;
 }
 
 //
 // double fs(double t, const double& shift, int i, const int &n) {
 //   if (i <= 25) return 0;
-//   if (i > 25 && i <= 50) return -0.5;
-//   if (i > 50 && i <= 75) return 0.5;
-//   return 0;
+//   if (i > 25 && i <= 50) return 0.3;
+//   if (i > 50 && i <= 75) return 0.7;
+//   return 1;
 // }
 //
 // double fr(double t, const double& shift, int i, const int &n) {
 //   if (i <= 25) return 0;
-//   if (i > 25 && i <= 50) return -0.5;
-//   if (i > 50 && i <= 75) return 0.5;
-//   return 0;
+//   if (i > 25 && i <= 50) return 0.3;
+//   if (i > 50 && i <= 75) return 0.7;
+//   return 1;
 // }
 //
 // double fs(double t, const double& shift, int i, const int &n) {
